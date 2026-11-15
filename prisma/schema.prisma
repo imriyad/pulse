@@ -1,0 +1,348 @@
+// Pulse database schema.
+//
+// Multi-tenancy rule: every table that belongs to a workspace carries its own
+// `workspaceId` column, even when it could be reached through a parent
+// (e.g. Vote -> Feedback -> Workspace). This lets the tenant-scoped Prisma
+// client (src/server/db/tenant.ts) filter every query with a single
+// `where: { workspaceId }`, and lets Postgres index it directly.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth.js tables (shape required by @auth/prisma-adapter)
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  memberships   Membership[]
+  feedback      Feedback[]     @relation("FeedbackAuthor")
+  votes         Vote[]
+  comments      Comment[]
+  statusChanges StatusChange[]
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?  @db.Text
+  access_token      String?  @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?  @db.Text
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Embeddable widget settings. Origins are checked against the request's
+  // Origin header (CORS) when the widget submits feedback.
+  widgetEnabled        Boolean  @default(false)
+  widgetAllowedOrigins String[] @default([])
+
+  memberships   Membership[]
+  feedback      Feedback[]
+  votes         Vote[]
+  comments      Comment[]
+  tags          Tag[]
+  feedbackTags  FeedbackTag[]
+  statusChanges StatusChange[]
+  webhooks      Webhook[]
+  deliveries    WebhookDelivery[]
+  outboxJobs    OutboxJob[]
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        Role     @default(MEMBER)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Feedback
+// ---------------------------------------------------------------------------
+
+enum FeedbackStatus {
+  OPEN
+  PLANNED
+  IN_PROGRESS
+  SHIPPED
+  DECLINED
+}
+
+/// Board submissions from signed-in users are APPROVED immediately.
+/// Widget submissions (anonymous, email only) and spam-flagged posts start as PENDING.
+enum ModerationState {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Feedback {
+  id          String          @id @default(cuid())
+  workspaceId String
+  title       String
+  description String          @db.Text
+  status      FeedbackStatus  @default(OPEN)
+  moderation  ModerationState @default(APPROVED)
+
+  // Either a signed-in author or, for widget submissions, just an email.
+  authorId    String?
+  authorEmail String?
+
+  // Denormalised counters, updated in the same transaction as the vote/comment
+  // write, so sorting the board by "top" is a cheap indexed read.
+  voteCount    Int @default(0)
+  commentCount Int @default(0)
+
+  // Merging duplicates: the duplicate points at the canonical item and is
+  // hidden from the board; its votes are moved to the canonical item.
+  mergedIntoId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author        User?          @relation("FeedbackAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  mergedInto    Feedback?      @relation("Merge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  duplicates    Feedback[]     @relation("Merge")
+  votes         Vote[]
+  comments      Comment[]
+  tags          FeedbackTag[]
+  statusChanges StatusChange[]
+
+  @@index([workspaceId, status, moderation])
+  @@index([workspaceId, voteCount(sort: Desc)])
+  @@index([workspaceId, createdAt(sort: Desc)])
+}
+
+model Vote {
+  id          String   @id @default(cuid())
+  workspaceId String
+  feedbackId  String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feedback  Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // "One vote per user" is enforced by the database, not just app code.
+  @@unique([feedbackId, userId])
+  @@index([workspaceId, createdAt])
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  feedbackId  String
+  authorId    String
+  body        String   @db.Text
+  /// Official team reply (posted by a workspace member), highlighted on the board.
+  isOfficial  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feedback  Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId, createdAt])
+  @@index([workspaceId])
+}
+
+model Tag {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  color       String @default("#64748b")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feedback  FeedbackTag[]
+
+  @@unique([workspaceId, name])
+}
+
+model FeedbackTag {
+  workspaceId String
+  feedbackId  String
+  tagId       String
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feedback  Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  tag       Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([feedbackId, tagId])
+  @@index([workspaceId])
+}
+
+/// Audit trail of status changes. Powers the analytics charts and is the
+/// source event for voter emails and webhooks.
+model StatusChange {
+  id          String         @id @default(cuid())
+  workspaceId String
+  feedbackId  String
+  fromStatus  FeedbackStatus
+  toStatus    FeedbackStatus
+  changedById String?
+  createdAt   DateTime       @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  feedback  Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  changedBy User?     @relation(fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Webhooks and background jobs
+// ---------------------------------------------------------------------------
+
+model Webhook {
+  id          String   @id @default(cuid())
+  workspaceId String
+  url         String
+  /// HMAC-SHA256 signing secret. Shown to the admin once, when created.
+  secret      String
+  events      String[] @default(["feedback.status_changed"])
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+}
+
+enum DeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+/// One row per (webhook, event). Doubles as the delivery log shown to admins.
+model WebhookDelivery {
+  id             String         @id @default(cuid())
+  workspaceId    String
+  webhookId      String
+  event          String
+  payload        Json
+  status         DeliveryStatus @default(PENDING)
+  attempts       Int            @default(0)
+  responseStatus Int?
+  lastError      String?
+  nextAttemptAt  DateTime       @default(now())
+  deliveredAt    DateTime?
+  createdAt      DateTime       @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  webhook   Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([webhookId, createdAt(sort: Desc)])
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+/// Transactional outbox. A job is written in the same DB transaction as the
+/// change that causes it, so we never "change status but forget to notify".
+/// Jobs are attempted right away (Next.js `after()`) and retried by /api/cron.
+model OutboxJob {
+  id          String    @id @default(cuid())
+  workspaceId String
+  type        String
+  payload     Json
+  status      JobStatus @default(PENDING)
+  attempts    Int       @default(0)
+  runAt       DateTime  @default(now())
+  lockedAt    DateTime?
+  lastError   String?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+/// Fixed-window counter kept in Postgres so rate limits work across Vercel's
+/// serverless instances without adding Redis.
+model RateLimitBucket {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+}
