@@ -6,3 +6,7 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# Pinned so API/CLI-created sites get the runtime too (the UI adds it automatically).
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

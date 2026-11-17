@@ -60,6 +60,9 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3
         version: 3.3.7
+      '@netlify/plugin-nextjs':
+        specifier: ^5.16.7
+        version: 5.16.7
       '@playwright/test':
         specifier: ^1.65.1
         version: 1.65.1
@@ -717,6 +720,10 @@ packages:
   '@modelcontextprotocol/server@2.4.0':
     resolution: {integrity: sha512-rgR9yxSaAJ+bcsi/XroT/S2AfPiIWloXAnrdfYSCms9ivVju0ishu/wW0J21Ho6+ZOR1r7RyeRbjiRuF87ix5Q==}
     engines: {node: '>=20'}
+
+  '@netlify/plugin-nextjs@5.16.7':
+    resolution: {integrity: sha512-3cP/P2rx5yIGWsFegfgWH03HjZi8gTwk9MkX1jwuyLfNm5hEF1AV1Pk0OO4SzFK6/UqcuZyXG/7MXh1anIJCgQ==}
+    engines: {node: '>=18.0.0'}
 
   '@next/env@15.5.29':
     resolution: {integrity: sha512-9SrTiTsgORa+KfhlXXAGC1eSs847E+d2MQTPUX+n7R5XA8g/B6ZitfL6GoYHNMLwG3Hzs1wjDH0/ME5WrGMqBQ==}
@@ -4040,6 +4047,8 @@ snapshots:
     dependencies:
       '@modelcontextprotocol/core': 2.4.0
       zod: 4.6.7
+
+  '@netlify/plugin-nextjs@5.16.7': {}
 
   '@next/env@15.5.29': {}
 
