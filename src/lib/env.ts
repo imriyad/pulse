@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { databaseUrl } from "@/lib/database-url";
 
 /**
  * Validated server environment. Importing this module fails fast with a clear
@@ -18,7 +19,10 @@ const envSchema = z.object({
 });
 
 function loadEnv() {
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = envSchema.safeParse({
+    ...process.env,
+    DATABASE_URL: databaseUrl(),
+  });
   if (!parsed.success) {
     const issues = parsed.error.issues
       .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)

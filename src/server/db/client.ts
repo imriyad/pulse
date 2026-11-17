@@ -1,5 +1,6 @@
 import "server-only";
 import { PrismaClient } from "@prisma/client";
+import { databaseUrl } from "@/lib/database-url";
 
 // Reuse one client across hot reloads in dev; otherwise every file change
 // would open a new connection pool and exhaust Postgres connections.
@@ -8,6 +9,7 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
+    datasourceUrl: databaseUrl(),
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 

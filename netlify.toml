@@ -1,0 +1,7 @@
+# Netlify detects Next.js and deploys it with its OpenNext-based runtime
+# (pages and route handlers become Netlify Functions).
+[build]
+  command = "bash scripts/netlify-build.sh"
+
+[build.environment]
+  NODE_VERSION = "22"
