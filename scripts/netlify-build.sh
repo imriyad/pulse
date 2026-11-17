@@ -9,10 +9,11 @@ set -euo pipefail
 export DATABASE_URL="${DATABASE_URL:-${NETLIFY_DATABASE_URL:-}}"
 export DIRECT_URL="${DIRECT_URL:-${NETLIFY_DATABASE_URL_UNPOOLED:-$DATABASE_URL}}"
 
-if [ -z "$DATABASE_URL" ]; then
-  echo "No database configured: set DATABASE_URL or connect Netlify DB to this site." >&2
-  exit 1
+if [ -n "$DATABASE_URL" ]; then
+  pnpm exec prisma migrate deploy
+else
+  echo "WARNING: no database configured (DATABASE_URL / Netlify DB). Skipping migrations;" >&2
+  echo "         only pages that don't touch the database will work." >&2
 fi
 
-pnpm exec prisma migrate deploy
 pnpm build

@@ -2,6 +2,7 @@
 # (pages and route handlers become Netlify Functions).
 [build]
   command = "bash scripts/netlify-build.sh"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "22"

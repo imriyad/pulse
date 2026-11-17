@@ -8,7 +8,9 @@ import { databaseUrl } from "@/lib/database-url";
  * inside a request.
  */
 const envSchema = z.object({
-  DATABASE_URL: z.string().min(1),
+  // Optional so the marketing and sign-in pages can be deployed without a database
+  // (frontend-only preview). Database-backed pages fail on first query until it is set.
+  DATABASE_URL: z.string().min(1).optional(),
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters"),
   AUTH_GITHUB_ID: z.string().optional().default(""),
   AUTH_GITHUB_SECRET: z.string().optional().default(""),
